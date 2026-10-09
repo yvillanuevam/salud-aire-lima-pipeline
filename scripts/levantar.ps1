@@ -36,7 +36,13 @@ try {
 
     if ((Ejecutar "docker compose config --quiet") -ne 0) { throw "docker-compose.yaml o .env invalidos (ver arriba)." }
     if ((Ejecutar "docker compose build --progress plain") -ne 0) { throw "Fallo docker compose build." }
-    if ((Ejecutar "docker compose up --exit-code-from airflow-init airflow-init") -ne 0) { throw "airflow-init no termino con codigo 0." }
+    # airflow-init se corre en segundo plano y se espera su codigo de salida con
+    # "docker wait" (mas robusto que quedarse "attached" a su salida).
+    if ((Ejecutar "docker compose up -d --force-recreate airflow-init") -ne 0) { throw "No se pudo iniciar airflow-init." }
+    $idInit = (cmd /c "docker compose ps -a -q airflow-init" | Select-Object -First 1)
+    $codigo = (cmd /c "docker wait $idInit" | Select-Object -Last 1)
+    Ejecutar "docker compose logs --no-color --tail 15 airflow-init" | Out-Null
+    if ("$codigo".Trim() -ne "0") { throw "airflow-init termino con codigo $codigo (ver logs arriba)." }
     if ((Ejecutar "docker compose up -d") -ne 0) { throw "Fallo docker compose up -d." }
 
     Write-Host ""
@@ -56,7 +62,9 @@ try {
     Ejecutar "docker compose exec -T airflow-scheduler airflow dags list" | Out-Null
     $estado = "OK"
     Write-Host ""
-    Write-Host "LISTO: Airflow en http://localhost:8080 y MinIO en http://localhost:9001" -ForegroundColor Green
+    $puerto = (Get-Content (Join-Path $raiz ".env") | Where-Object { $_ -match "^AIRFLOW_PORT=(\d+)" } | ForEach-Object { $Matches[1] }) | Select-Object -First 1
+    if (-not $puerto) { $puerto = "8080" }
+    Write-Host "LISTO: Airflow en http://localhost:$puerto y MinIO en http://localhost:9001" -ForegroundColor Green
 }
 catch {
     Write-Host ""

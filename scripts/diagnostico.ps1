@@ -19,6 +19,7 @@ function Ejecutar([string]$comando) {
 }
 
 Ejecutar "docker compose ps -a"
+Ejecutar "docker ps --format {{.Names}}^|{{.Ports}}"
 Ejecutar "docker compose exec -T airflow-scheduler airflow dags list-import-errors"
 Ejecutar "docker compose exec -T airflow-scheduler airflow dags list"
 Ejecutar "docker compose exec -T airflow-scheduler airflow pools list"
