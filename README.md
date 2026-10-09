@@ -40,7 +40,7 @@ Proyecto Final Integrador — PEDE/9 Apache Airflow.
 | Etapa | Qué pasa | Tecnología |
 |---|---|---|
 | 1. Ingesta | Sensor espera el CSV en el SFTP; extracción de la API con un *mapped task* por sensor | Airflow (`SFTPSensor`, `SFTPHook`, Dynamic Task Mapping, pool) |
-| 2. Staging intermedio | Copia fiel del original (`raw/`), versión validada (`staged/`) y filas rechazadas (`cuarentena/`) | MinIO (API S3, `S3Hook`) |
+| 2. Staging intermedio | Copia fiel del original (`raw/`), versión validada (`staged/`) y filas rechazadas (`cuarentena/`) | MinIO (fork `pgsty/minio`, API S3, `S3Hook`) |
 | 3. Carga al warehouse | `DELETE + INSERT` del día en una transacción (idempotente) | Snowflake (`SnowflakeHook`) |
 | 4. Transformación | `staging → intermediate → marts`, con tests después de cada modelo | dbt + Astronomer Cosmos (`DbtTaskGroup`) |
 | 5. Consumo | Reporte diario Markdown + CSV en `reportes/` y consultas SQL de ejemplo | Snowflake / MinIO |
@@ -340,7 +340,7 @@ dbt y reporte), declarados como `owner` en las tareas y en el `meta` de dbt.
 |---|---|
 | `Falta AIRFLOW_FERNET_KEY en .env` al hacer `docker compose up` | No se corrió `scripts/preparar_env`. Córrelo y vuelve a intentar. |
 | Contenedores que nunca quedan *healthy* | Poca RAM en Docker Desktop: súbela a 6-8 GB. |
-| `Bind for 0.0.0.0:8080 failed` | Otro Airflow usa el puerto. `docker ps`, apágalo, o cambia `"8080:8080"` por `"8081:8080"`. |
+| `Bind for 0.0.0.0:8080 failed` | Otro Airflow usa el puerto: apágalo o define `AIRFLOW_PORT=8081` en `.env` y entra por `http://localhost:8081`. |
 | El sensor espera para siempre | No se corrió el simulador para esa `fecha_proceso`, o se usaron fechas distintas en ambos DAGs. |
 | `OpenAQ rechazo la API key (HTTP 401)` | `OPENAQ_API_KEY` vacía o mal copiada en `.env`; luego `docker compose up -d`. |
 | `OpenAQ no tiene sensores PM2.5 activos cerca de Lima` | La API no tiene estaciones activas ese día: usa `FUENTE_CALIDAD_AIRE=simulada` y `docker compose up -d`. |
@@ -348,3 +348,5 @@ dbt y reporte), declarados como `owner` en las tareas y en el `meta` de dbt.
 | `Insufficient privileges` en dbt | El rol `ROLE_SALUD_AIRE_TRANSFORMACION` no está asignado a tu usuario (paso 4 del script SQL). |
 | `Se rechazo el X% de las filas` | Funciona como se diseñó: revisa `cuarentena/` en MinIO. El umbral es la Variable `umbral_rechazo_atenciones`. |
 | Cambié `requirements*.txt` y no lo toma | `docker compose build` y luego `docker compose up -d`. |
+| `pull access denied for minio/minio` | MinIO dejó de publicar imágenes (Docker Hub y quay.io). El proyecto ya usa `pgsty/minio`, el fork comunitario mantenido; si ves este error tienes un `docker-compose.yaml` antiguo. |
+| `500 Internal Server Error` o `unexpected EOF` de Docker | El motor de Docker Desktop se cayó: reinícialo (ballena → *Restart*) y repite `levantar.bat`. |
