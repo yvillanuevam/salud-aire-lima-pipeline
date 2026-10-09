@@ -1,0 +1,6 @@
+# Finales de linea consistentes entre Windows y Linux (los contenedores son Linux).
+* text=auto eol=lf
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.png binary
+*.pdf binary

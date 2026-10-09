@@ -1,0 +1,21 @@
+[project]
+name = "salud-aire-lima-pipeline"
+version = "1.0.0"
+description = "Pipeline de datos: calidad del aire (OpenAQ) vs. atenciones respiratorias en Lima, con Airflow, MinIO, Snowflake y dbt"
+requires-python = ">=3.12"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["dags/dbt"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S"]
+ignore = [
+    "S101",  # assert es la forma normal de escribir tests con pytest
+    "S311",  # random no se usa con fines criptograficos (solo datos simulados)
+    "S608",  # SQL construido solo con identificadores validados/constantes
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["salud_aire"]

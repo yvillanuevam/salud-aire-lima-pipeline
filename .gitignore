@@ -1,0 +1,34 @@
+# --- Secretos: nunca al repositorio ---
+.env
+*.pem
+id_ed25519*
+deploy_key*
+
+# --- Python ---
+.venv/
+.dbt_venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# --- Generados por Docker / Airflow ---
+logs/*
+!logs/.gitkeep
+config/airflow.cfg
+
+# --- Artefactos de dbt ---
+dags/dbt/salud_aire/target/
+dags/dbt/salud_aire/dbt_packages/
+dags/dbt/salud_aire/logs/
+dags/dbt/salud_aire/.user.yml
+
+# --- Editor / SO ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# --- Logs de los scripts de operacion local ---
+logs_ejecucion/
+config/conf_fecha.json
