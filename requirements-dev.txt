@@ -1,0 +1,3 @@
+# Herramientas de desarrollo y CI (no van a la imagen de Airflow).
+pytest==8.4.1
+ruff==0.12.1

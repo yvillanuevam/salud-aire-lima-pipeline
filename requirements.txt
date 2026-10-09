@@ -1,0 +1,10 @@
+# Dependencias que se instalan SOBRE la imagen apache/airflow:3.0.6.
+# Las versiones de los providers coinciden con el archivo de constraints
+# oficial de Airflow 3.0.6 (Python 3.12), para que el entorno sea reproducible.
+apache-airflow-providers-amazon==9.12.0
+apache-airflow-providers-sftp==5.3.4
+apache-airflow-providers-snowflake==6.4.0
+apache-airflow-providers-standard==1.6.0
+# Cosmos 1.10.x: soporta Airflow 3.0. Desde 1.11 Cosmos trae un plugin de UI que
+# exige Airflow >= 3.1 y en 3.0.x deja un error "Failed to import plugin cosmos".
+astronomer-cosmos==1.10.2

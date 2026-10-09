@@ -1,0 +1,22 @@
+{
+  "Rules": [
+    {
+      "ID": "expirar-cuarentena-90-dias",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "cuarentena/" },
+      "Expiration": { "Days": 90 }
+    },
+    {
+      "ID": "expirar-staged-180-dias",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "staged/" },
+      "Expiration": { "Days": 180 }
+    },
+    {
+      "ID": "expirar-raw-730-dias",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "raw/" },
+      "Expiration": { "Days": 730 }
+    }
+  ]
+}

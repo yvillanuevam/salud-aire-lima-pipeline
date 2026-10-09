@@ -1,0 +1,293 @@
+# docker-compose.yaml — Salud-Aire Lima
+#
+# Basado en el docker-compose oficial de Apache Airflow 3.0.x, con estos cambios:
+#   * LocalExecutor en vez de CeleryExecutor: un solo nodo y pocas tareas por dia;
+#     ahorra Redis + worker (~1 GB de RAM). Ver docs/arquitectura.md (decision D4).
+#   * "build: ." para incluir Cosmos y dbt (ver Dockerfile).
+#   * Servicios de "mundo real" que simulan las fuentes y el staging intermedio:
+#       - sftp-clinicas: servidor SFTP donde las clinicas dejan el CSV diario.
+#       - minio:         object storage compatible con S3 (data lake intermedio).
+#   * Contenedores de inicializacion idempotentes (llaves SSH, bucket, usuario de
+#     MinIO con permisos minimos, pool de Airflow).
+#   * Connections y Variables de Airflow inyectadas como variables de entorno
+#     (AIRFLOW_CONN_* / AIRFLOW_VAR_*): los secretos viven solo en .env (que NO
+#     se versiona) y nunca quedan guardados en la base de metadatos.
+#
+# Uso (ver README.md):
+#   docker compose build
+#   docker compose up airflow-init
+#   docker compose up -d
+#   docker compose down        (conserva historial)
+#   docker compose down -v     (borra historial, data lake y llaves)
+
+x-airflow-common:
+  &airflow-common
+  build: .
+  image: salud-aire-airflow:local
+  environment:
+    &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:${AIRFLOW_DB_PASSWORD:?Falta AIRFLOW_DB_PASSWORD en .env}@postgres/airflow
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:?Falta AIRFLOW_FERNET_KEY en .env (corre scripts/preparar_env)}
+    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET:?Falta AIRFLOW_JWT_SECRET en .env}
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DEFAULT_TIMEZONE: America/Lima
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
+    AIRFLOW__DAG_PROCESSOR__REFRESH_INTERVAL: "60"
+    # ---------------- Connections de Airflow (formato JSON) ----------------
+    # SFTP de las clinicas: autenticacion SOLO por llave (la genera sftp-keygen).
+    AIRFLOW_CONN_SFTP_CLINICAS: '{"conn_type": "sftp", "host": "sftp-clinicas", "port": 22, "login": "clinicas", "extra": {"key_file": "/opt/airflow/llaves/sftp/id_ed25519", "no_host_key_check": "true"}}'
+    # MinIO con el usuario de servicio de permisos minimos (no el usuario root).
+    AIRFLOW_CONN_MINIO_DATALAKE: '{"conn_type": "aws", "login": "${MINIO_AIRFLOW_ACCESS_KEY:?Falta MINIO_AIRFLOW_ACCESS_KEY}", "password": "${MINIO_AIRFLOW_SECRET_KEY:?Falta MINIO_AIRFLOW_SECRET_KEY}", "extra": {"endpoint_url": "http://minio:9000", "region_name": "us-east-1"}}'
+    # API publica OpenAQ v3 (la API key va en el campo password).
+    AIRFLOW_CONN_OPENAQ_API: '{"conn_type": "http", "host": "api.openaq.org", "schema": "https", "password": "${OPENAQ_API_KEY:-}"}'
+    # Snowflake con el rol de INGESTA (solo puede escribir en RAW y leer MARTS).
+    AIRFLOW_CONN_SNOWFLAKE_SALUD_AIRE: '{"conn_type": "snowflake", "login": "${SNOWFLAKE_USER:-sin_configurar}", "password": "${SNOWFLAKE_PASSWORD:-sin_configurar}", "schema": "RAW", "extra": {"account": "${SNOWFLAKE_ACCOUNT:-sin_configurar}", "warehouse": "WH_SALUD_AIRE", "database": "SALUD_AIRE_DB", "role": "ROLE_SALUD_AIRE_INGESTA"}}'
+    # ---------------- Variables de Airflow ----------------
+    AIRFLOW_VAR_FUENTE_CALIDAD_AIRE: ${FUENTE_CALIDAD_AIRE:-openaq}
+    AIRFLOW_VAR_BUCKET_DATALAKE: salud-aire-datalake
+    AIRFLOW_VAR_UMBRAL_RECHAZO_ATENCIONES: "0.20"
+    # ---------------- dbt (profiles.yml las lee con env_var()) ----------------
+    SNOWFLAKE_ACCOUNT: ${SNOWFLAKE_ACCOUNT:-sin_configurar}
+    SNOWFLAKE_USER: ${SNOWFLAKE_USER:-sin_configurar}
+    SNOWFLAKE_PASSWORD: ${SNOWFLAKE_PASSWORD:-sin_configurar}
+    DBT_EXECUTABLE_PATH: /opt/airflow/dbt_venv/bin/dbt
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./tests:/opt/airflow/tests
+    - ./logs:/opt/airflow/logs
+    - ./plugins:/opt/airflow/plugins
+    - ./config:/opt/airflow/config
+    - sftp-llave-cliente:/opt/airflow/llaves/sftp:ro
+  user: "${AIRFLOW_UID:-50000}:0"
+  depends_on:
+    &airflow-common-depends-on
+    postgres:
+      condition: service_healthy
+
+services:
+  # ------------------------------------------------------------------
+  # Base de metadatos de Airflow (no expuesta fuera de la red de Docker)
+  # ------------------------------------------------------------------
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: ${AIRFLOW_DB_PASSWORD:?Falta AIRFLOW_DB_PASSWORD en .env}
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres-db-volume:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      retries: 5
+      start_period: 5s
+    restart: always
+
+  # ------------------------------------------------------------------
+  # Fuente 1: servidor SFTP de las clinicas (proveedor externo simulado)
+  # ------------------------------------------------------------------
+  sftp-keygen:
+    # Genera UNA vez el par de llaves ed25519 que usa Airflow para entrar al SFTP.
+    # La privada queda en un volumen que solo montan los contenedores de Airflow
+    # (solo lectura); la publica en otro volumen que solo monta el servidor SFTP.
+    image: atmoz/sftp:alpine
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        if [ ! -f /cliente/id_ed25519 ]; then
+          ssh-keygen -q -t ed25519 -N "" -C "airflow-salud-aire" -f /cliente/id_ed25519
+          echo "Llave SSH generada."
+        else
+          echo "La llave SSH ya existia; se reutiliza."
+        fi
+        cp /cliente/id_ed25519.pub /servidor/airflow.pub
+        chown ${AIRFLOW_UID:-50000}:0 /cliente/id_ed25519 /cliente/id_ed25519.pub
+        chmod 600 /cliente/id_ed25519
+    volumes:
+      - sftp-llave-cliente:/cliente
+      - sftp-llaves-autorizadas:/servidor
+    restart: "no"
+
+  sftp-clinicas:
+    image: atmoz/sftp:alpine
+    # usuario::uid:gid:carpeta  -> sin password: solo se entra con llave.
+    command: clinicas::1001:1001:upload
+    volumes:
+      - sftp-llaves-autorizadas:/home/clinicas/.ssh/keys:ro
+      - sftp-datos:/home/clinicas/upload
+    ports:
+      - "2222:22"
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 22 || exit 1"]
+      interval: 10s
+      retries: 10
+      start_period: 5s
+    depends_on:
+      sftp-keygen:
+        condition: service_completed_successfully
+    restart: always
+
+  # ------------------------------------------------------------------
+  # Staging intermedio: MinIO (API compatible con S3)
+  # ------------------------------------------------------------------
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Falta MINIO_ROOT_USER en .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Falta MINIO_ROOT_PASSWORD en .env}
+    volumes:
+      - minio-datos:/data
+    ports:
+      - "9000:9000"   # API S3
+      - "9001:9001"   # consola web
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      retries: 10
+      start_period: 5s
+    restart: always
+
+  minio-init:
+    # Crea (de forma idempotente) el bucket, la politica de permisos minimos,
+    # el usuario de servicio de Airflow y las reglas de ciclo de vida.
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
+        mc mb --ignore-existing local/salud-aire-datalake
+        mc admin policy create local politica-airflow-datalake /infra/politica_airflow.json
+        mc admin user add local "$$MINIO_AIRFLOW_ACCESS_KEY" "$$MINIO_AIRFLOW_SECRET_KEY"
+        mc admin policy attach local politica-airflow-datalake --user "$$MINIO_AIRFLOW_ACCESS_KEY" || echo "La politica ya estaba asignada."
+        mc ilm import local/salud-aire-datalake < /infra/ciclo_de_vida.json
+        echo "MinIO listo: bucket, usuario de servicio y ciclo de vida configurados."
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_AIRFLOW_ACCESS_KEY: ${MINIO_AIRFLOW_ACCESS_KEY}
+      MINIO_AIRFLOW_SECRET_KEY: ${MINIO_AIRFLOW_SECRET_KEY}
+    volumes:
+      - ./infra/minio:/infra:ro
+    depends_on:
+      minio:
+        condition: service_healthy
+    restart: "no"
+
+  # ------------------------------------------------------------------
+  # Airflow 3
+  # ------------------------------------------------------------------
+  airflow-apiserver:
+    <<: *airflow-common
+    command: api-server
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/api/v2/version"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+      sftp-clinicas:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+
+  airflow-dag-processor:
+    <<: *airflow-common
+    command: dag-processor
+    healthcheck:
+      test: ["CMD-SHELL", 'airflow jobs check --job-type DagProcessorJob --hostname "$${HOSTNAME}"']
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-triggerer:
+    <<: *airflow-common
+    command: triggerer
+    healthcheck:
+      test: ["CMD-SHELL", 'airflow jobs check --job-type TriggererJob --hostname "$${HOSTNAME}"']
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-init:
+    <<: *airflow-common
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        set -e
+        mkdir -p /sources/logs /sources/dags /sources/plugins /sources/config
+        chown -R "${AIRFLOW_UID:-50000}:0" /sources/logs /sources/dags /sources/plugins /sources/config
+        /entrypoint airflow version
+        # Pool que limita las llamadas concurrentes a la API de OpenAQ
+        # (plan gratuito: 60 req/min y 2000 req/h por API key).
+        airflow pools set api_openaq 2 "Llamadas concurrentes maximas a la API de OpenAQ"
+        echo "airflow-init terminado correctamente."
+    environment:
+      <<: *airflow-common-env
+      _AIRFLOW_DB_MIGRATE: "true"
+      _AIRFLOW_WWW_USER_CREATE: "true"
+      _AIRFLOW_WWW_USER_USERNAME: ${AIRFLOW_ADMIN_USER:-admin}
+      _AIRFLOW_WWW_USER_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:?Falta AIRFLOW_ADMIN_PASSWORD en .env}
+    user: "0:0"
+    volumes:
+      - .:/sources
+
+  airflow-cli:
+    <<: *airflow-common
+    profiles:
+      - debug
+    environment:
+      <<: *airflow-common-env
+      CONNECTION_CHECK_MAX_COUNT: "0"
+    command:
+      - bash
+      - -c
+      - airflow
+
+volumes:
+  postgres-db-volume:
+  minio-datos:
+  sftp-datos:
+  sftp-llave-cliente:
+  sftp-llaves-autorizadas:

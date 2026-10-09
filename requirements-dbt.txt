@@ -1,0 +1,3 @@
+# dbt vive en su propio entorno virtual (ver Dockerfile), separado de Airflow.
+dbt-core==1.11.*
+dbt-snowflake==1.11.*
