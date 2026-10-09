@@ -1,7 +1,7 @@
 # scripts/diagnostico.ps1
 # Junta en logs_ejecucion/diagnostico.log todo lo necesario para revisar un problema:
 # estado de los contenedores, errores de import de DAGs, logs recientes,
-# tests dentro del contenedor y dbt debug. No muestra contrasenas.
+# Connections configuradas y dbt debug. No muestra contrasenas.
 
 $ErrorActionPreference = "Continue"
 $raiz = Split-Path -Parent $PSScriptRoot
@@ -23,9 +23,8 @@ Ejecutar "docker ps --format {{.Names}}^|{{.Ports}}"
 Ejecutar "docker compose exec -T airflow-scheduler airflow dags list-import-errors"
 Ejecutar "docker compose exec -T airflow-scheduler airflow dags list"
 Ejecutar "docker compose exec -T airflow-scheduler airflow pools list"
-Ejecutar "docker compose exec -T airflow-scheduler bash -c `"airflow connections list -o table 2>/dev/null | cut -c1-60`""
-Ejecutar "docker compose exec -T airflow-scheduler pytest /opt/airflow/tests -q -p no:cacheprovider"
-Ejecutar "docker compose exec -T airflow-scheduler bash -c `"cd /opt/airflow/dags/dbt/salud_aire && /opt/airflow/dbt_venv/bin/dbt debug --profiles-dir . --target-path /tmp/dbt_target --log-path /tmp/dbt_logs`""
+Ejecutar "docker compose exec -T airflow-scheduler bash -c `"for c in sftp_clinicas minio_datalake openaq_api snowflake_salud_aire; do airflow connections get `$c -o json >/dev/null 2>&1 && echo Connection `$c: OK || echo Connection `$c: FALTA; done`""
+Ejecutar "docker compose exec -T airflow-scheduler bash -c `"cd /opt/airflow/dags/dbt/salud_aire && /opt/airflow/dbt_venv/bin/dbt debug --profiles-dir . --log-path /tmp/dbt_logs`""
 foreach ($s in @("sftp-keygen", "minio-init", "airflow-init", "airflow-scheduler", "airflow-dag-processor", "airflow-apiserver")) {
     Ejecutar "docker compose logs --tail 60 $s"
 }

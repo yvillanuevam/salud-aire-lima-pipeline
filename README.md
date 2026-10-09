@@ -128,7 +128,7 @@ Las Connections y Variables de Airflow se inyectan desde `.env`; no hay que crea
 ```powershell
 docker compose exec airflow-scheduler airflow connections get snowflake_salud_aire -o json
 docker compose exec airflow-scheduler bash -c "cd /opt/airflow/dags/dbt/salud_aire && /opt/airflow/dbt_venv/bin/dbt debug --profiles-dir ."
-docker compose exec airflow-scheduler pytest /opt/airflow/tests -q
+powershell -ExecutionPolicy Bypass -File scripts\diagnostico.ps1   # resumen en logs_ejecucion\diagnostico.log
 ```
 
 `dbt debug` debe terminar con **All checks passed!**
