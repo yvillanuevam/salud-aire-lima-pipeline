@@ -22,8 +22,10 @@
 
 x-airflow-common:
   &airflow-common
+  # Sin "image:" fijo a proposito: si todos los servicios comparten el mismo tag,
+  # el build en paralelo de docker compose falla con "image already exists".
+  # Cada servicio recibe su propio tag; las capas son las mismas (cache).
   build: .
-  image: salud-aire-airflow:local
   environment:
     &airflow-common-env
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
