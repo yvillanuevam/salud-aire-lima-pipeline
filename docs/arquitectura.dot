@@ -1,0 +1,45 @@
+// Fuente del diagrama de arquitectura. Regenerar con:
+//   dot -Tpng -Gdpi=160 docs/arquitectura.dot -o docs/arquitectura.png
+digraph arquitectura {
+  rankdir=LR;
+  newrank=true;
+  graph [fontname="Helvetica", fontsize=13, nodesep=0.45, ranksep=0.45, pad=0.3, bgcolor="white", labeljust="l"];
+  node  [fontname="Helvetica", fontsize=11, shape=box, style="rounded,filled", color="#3b4a6b", fillcolor="#eef2fa", penwidth=1.2, margin="0.15,0.08"];
+  edge  [fontname="Helvetica", fontsize=9, color="#55607a", arrowsize=0.7];
+
+  subgraph cluster_fuentes {
+    label="1 · Fuentes"; style="rounded,dashed"; color="#c77d1a"; fontcolor="#c77d1a";
+    sftp   [label="SFTP de las clinicas\nCSV diario estilo Excel\n(';', cp1252, dd/mm/aaaa)\nacceso solo con llave SSH", fillcolor="#fff4e5", color="#c77d1a"];
+    openaq [label="API OpenAQ v3\nPM2.5 promedio diario\nAPI key + 60 req/min", fillcolor="#fff4e5", color="#c77d1a"];
+  }
+
+  subgraph cluster_ingesta {
+    label="Airflow · ingesta"; style="rounded"; color="#3b4a6b"; fontcolor="#3b4a6b";
+    sensor [label="SFTPSensor\nmode=reschedule"];
+    valida [label="Validar CSV\nfilas malas -> cuarentena\nfalla si rechazo > 20%"];
+    api    [label="Dynamic Task Mapping\n(1 tarea por sensor)\npool api_openaq = 2\nbackoff ante 429/5xx"];
+  }
+
+  subgraph cluster_minio {
+    label="2 · Staging intermedio"; style="rounded,dashed"; color="#2e8b57"; fontcolor="#2e8b57";
+    lake [label="MinIO (S3)\nsalud-aire-datalake\n\nraw/  staged/\ncuarentena/  reportes/", shape=cylinder, fillcolor="#e8f6ee", color="#2e8b57"];
+  }
+
+  subgraph cluster_snow {
+    label="3-4 · Snowflake  SALUD_AIRE_DB   (carga Airflow + transformacion dbt con Cosmos)"; style="rounded,dashed"; color="#1f6fb2"; fontcolor="#1f6fb2";
+    raw  [label="RAW\natenciones_respiratorias\nmediciones_aire", shape=cylinder, fillcolor="#e6f0fb", color="#1f6fb2"];
+    stg  [label="STAGING\nstg_atenciones\nstg_mediciones_aire\nseeds de distritos", fillcolor="#e6f0fb", color="#1f6fb2"];
+    int  [label="INTERMEDIATE\nint_atenciones_distrito_dia\nint_pm25_distrito_dia", fillcolor="#e6f0fb", color="#1f6fb2"];
+    mart [label="MARTS\nfct_salud_aire_distrito_dia\ndim_distrito", fillcolor="#e6f0fb", color="#1f6fb2"];
+  }
+
+  consumo [label="5 · Consumo\nreporte diario (MD + CSV)\nconsultas SQL / BI", fillcolor="#f3e8fb", color="#7a3fa8"];
+
+  sftp -> sensor -> valida;
+  openaq -> api;
+  valida -> lake;
+  api -> lake;
+  lake -> raw [label="DELETE + INSERT\npor dia (idempotente)"];
+  raw -> stg -> int -> mart [label=""];
+  mart -> consumo;
+}

@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Salud-Aire Lima — Documento de arquitectura</title>
+<style>
+  @page { size: A4; margin: 13mm 14mm 12mm 14mm; }
+  :root { --ink:#1d2433; --muted:#5b6478; --accent:#1f6fb2; --line:#d9dee8; --soft:#f4f6fa; }
+  * { box-sizing: border-box; }
+  body { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; color: var(--ink); font-size: 9.3pt; line-height: 1.38; margin: 0; }
+  header { border-bottom: 2px solid var(--accent); padding-bottom: 5px; margin-bottom: 8px; }
+  h1 { font-size: 16pt; margin: 0 0 2px; letter-spacing: -0.2px; }
+  .sub { color: var(--muted); font-size: 8.8pt; }
+  .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 18px; margin-top: 5px; font-size: 8.6pt; }
+  .meta b { color: var(--muted); font-weight: 600; }
+  h2 { font-size: 10.8pt; color: var(--accent); margin: 10px 0 4px; padding-bottom: 2px; border-bottom: 1px solid var(--line); }
+  p { margin: 0 0 5px; }
+  ul { margin: 2px 0 5px 16px; padding: 0; }
+  li { margin-bottom: 2px; }
+  img.diagrama { width: 100%; border: 1px solid var(--line); border-radius: 4px; margin: 3px 0 2px; }
+  .caption { font-size: 7.8pt; color: var(--muted); margin-bottom: 4px; }
+  table { width: 100%; border-collapse: collapse; font-size: 8.4pt; margin: 3px 0 6px; }
+  th, td { text-align: left; vertical-align: top; padding: 3px 5px; border-bottom: 1px solid var(--line); }
+  th { background: var(--soft); font-weight: 600; }
+  td:first-child { white-space: nowrap; }
+  code { font-family: "SFMono-Regular", Menlo, Consolas, monospace; font-size: 8pt; background: var(--soft); padding: 0 2px; border-radius: 2px; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+  .nota { background: var(--soft); border-left: 3px solid var(--accent); padding: 4px 8px; font-size: 8.5pt; margin: 4px 0 6px; }
+  .pagebreak { break-before: page; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Salud-Aire Lima — Pipeline de datos con Apache Airflow</h1>
+  <div class="sub">Documento de arquitectura · Proyecto Final Integrador · PEDE/9 Apache Airflow</div>
+  <div class="meta">
+    <div><b>Equipo:</b> [completar nombres]</div>
+    <div><b>Repositorio:</b> https://github.com/[usuario]/salud-aire-lima-pipeline</div>
+    <div><b>Fecha:</b> [completar]</div>
+    <div><b>Video demo:</b> [completar link]</div>
+  </div>
+</header>
+
+<h2>1. Caso de negocio</h2>
+<p>Un área de salud pública de Lima Metropolitana necesita saber <b>cada mañana en qué distritos la mala
+calidad del aire coincide con un aumento de atenciones por enfermedades respiratorias</b>, para reforzar
+personal y lanzar campañas preventivas dirigidas a menores de 5 años y adultos mayores. Hoy esa información
+está en dos lugares que no se hablan: los archivos diarios de la red de clínicas y las mediciones de PM2.5
+de las estaciones de monitoreo.</p>
+<p>El pipeline cruza ambas fuentes por <b>distrito (ubigeo) y día</b> y entrega una tabla con atenciones,
+PM2.5 de 24 h, su categoría frente a la guía OMS (15 µg/m³) y al ECA Perú (50 µg/m³), la variación frente a
+los 7 días previos y una <b>bandera de alerta</b> (aire sobre la guía OMS y atenciones ≥ 20 % sobre su
+promedio), además de un reporte diario.</p>
+
+<h2>2. Arquitectura</h2>
+<img class="diagrama" src="arquitectura.png" alt="Diagrama de arquitectura">
+<div class="caption">Ingesta → staging intermedio (MinIO) → carga (Snowflake RAW) → transformación (dbt vía Cosmos) → consumo. Todo orquestado por el DAG <code>pipeline_salud_aire</code> (06:00, <code>catchup=False</code>).</div>
+
+<table>
+  <tr><th>Fuente</th><th>Origen y "imperfecciones"</th><th>Cómo se maneja</th></tr>
+  <tr><td>Atenciones respiratorias</td>
+      <td>CSV diario de la red de clínicas en un <b>SFTP</b> (llave SSH). Export de Excel: <code>;</code>, Windows-1252,
+          fechas dd/mm/aaaa, <code>N/D</code>, negativos, reenvíos, distritos escritos de varias formas; puede llegar tarde.</td>
+      <td><code>SFTPSensor</code> en <code>reschedule</code> (timeout 3 h); validación con cuarentena y umbral de rechazo
+          del 20 %; normalización y deduplicación en dbt. Proveedor simulado por un DAG aparte (enunciado §12).</td></tr>
+  <tr><td>Calidad del aire</td>
+      <td><b>API pública OpenAQ v3</b>: API key, límite de 60 req/min y 2 000 req/h, HTTP 429, estaciones que se apagan.</td>
+      <td>Dynamic Task Mapping (1 tarea por sensor) limitado por el pool <code>api_openaq</code> (2 slots);
+          backoff que respeta <code>Retry-After</code>; sin reintento ante 401/403.</td></tr>
+</table>
+
+<h2>3. Decisiones de diseño más importantes</h2>
+<table>
+  <tr><th>Decisión</th><th>Por qué</th></tr>
+  <tr><td>¿Por qué estas fuentes?</td><td>Son las dos mitades de la pregunta de negocio y representan dos tipos de origen reales
+      (archivo por transferencia + API con límites). La clave común no viene dada: hay que construirla (texto libre → ubigeo; coordenadas → estación más cercana).</td></tr>
+  <tr><td>Validación en 2 niveles</td><td>Python valida la <i>estructura</i> antes de cargar (un archivo sin columnas falla con un mensaje claro);
+      dbt aplica las reglas de <i>negocio</i> en SQL versionado y testeado.</td></tr>
+  <tr><td>Cuarentena + umbral</td><td>Una fila mala no debe frenar el reporte, pero un archivo corrupto no puede pasar en silencio: si se rechaza &gt; 20 %, la tarea falla y alerta.</td></tr>
+  <tr><td>MinIO como staging</td><td>Trazabilidad y respaldo: copia fiel del original (<code>raw/</code>), versión validada (<code>staged/</code>) y rechazos (<code>cuarentena/</code>), con reglas de ciclo de vida. Mismo código sirve con AWS S3 (solo cambia la Connection).</td></tr>
+  <tr><td>Carga idempotente</td><td><code>DELETE + INSERT</code> del día en una transacción: reintentos y reprocesos (<code>fecha_proceso</code>) nunca duplican datos.</td></tr>
+  <tr><td>Estación más cercana</td><td><code>HAVERSINE</code> con radio ≤ 10 km y cobertura ≥ 50 %: un promedio de toda Lima borraría la diferencia entre distritos.</td></tr>
+  <tr><td>LocalExecutor + dbt en venv</td><td>Un nodo y ~40 tareas diarias: Celery agregaría Redis y un worker (~1 GB RAM) sin beneficio. dbt corre en su propio entorno virtual (Cosmos en modo subproceso) para evitar conflictos de dependencias con Airflow.</td></tr>
+</table>
+
+<h2>4. Modelado y tests de dbt priorizados</h2>
+<p>Cadena: <code>stg_atenciones</code> / <code>stg_mediciones_aire</code> → <code>int_atenciones_distrito_dia</code> /
+<code>int_pm25_distrito_dia</code> → <code>fct_salud_aire_distrito_dia</code> + <code>dim_distrito</code>, con dos seeds
+(<code>distritos_lima</code>, <code>alias_distritos</code>). Cosmos crea una tarea por seed, modelo y test (41 tests).
+Los umbrales de negocio son <code>vars</code> de dbt: cambiarlos queda versionado y pasa por PR.</p>
+<table>
+  <tr><th>Test</th><th>Severidad</th><th>Por qué se priorizó</th></tr>
+  <tr><td>Conciliación staging ↔ mart (singular)</td><td>error</td><td>El riesgo n.º 1 de este modelo son los joins (alias, rejilla distrito × día). Si la suma de atenciones no cuadra exactamente, el reporte no se publica.</td></tr>
+  <tr><td><code>combinacion_unica</code> (genérico propio)</td><td>error</td><td>Garantiza la clave natural en cada capa (p. ej. <code>fecha + ubigeo</code> en el mart): detecta duplicados por reenvíos o joins.</td></tr>
+  <tr><td><code>relationships</code> distrito → alias</td><td><b>warn</b> + <code>store_failures</code></td><td>Una forma nueva de escribir un distrito (o uno fuera de Lima, como CALLAO) no debe detener la operación, pero queda en <code>AUDITORIA.DISTRITOS_SIN_MAPEAR</code> para agregarla al seed.</td></tr>
+  <tr><td><code>no_negativo</code>, <code>valor_en_rango</code> (propios)</td><td>error</td><td>Valores físicamente imposibles (atenciones &lt; 0, PM2.5 fuera de 0–1000 µg/m³) indican un problema de origen.</td></tr>
+  <tr><td><code>accepted_values</code>, <code>not_null</code>, <code>unique</code></td><td>error</td><td>Dominios de negocio (grupos de edad, categorías de aire, zonas) e integridad de las dimensiones.</td></tr>
+</table>
+<p>Se escribieron tests genéricos propios en vez de usar <code>dbt_utils</code> para no depender de <code>dbt deps</code> (red) en cada ejecución.</p>
+
+<div class="cols">
+<div>
+<h2>5. Orquestación</h2>
+<ul>
+  <li><b>TaskGroups</b> por etapa: ingesta SFTP, ingesta API, carga RAW, <code>DbtTaskGroup</code>.</li>
+  <li><b>Sensor</b> <code>SFTPSensor</code> en <code>reschedule</code>: no ocupa un slot mientras espera.</li>
+  <li><b>Retries con criterio</b>: 2 con backoff exponencial por defecto; 4 en la API; 3 en la carga (idempotente); 1 en dbt (un error de SQL no se arregla reintentando).</li>
+  <li><code>on_failure_callback</code>, <code>execution_timeout</code>, <code>dagrun_timeout</code>, <code>max_active_runs=1</code>.</li>
+  <li><code>doc_md</code> en ambos DAGs; <code>owner</code> por tarea (<code>ingenieria_datos</code>, <code>analytics_salud</code>).</li>
+</ul>
+</div>
+<div>
+<h2>6. Testing y CI/CD</h2>
+<ul>
+  <li><b>58 tests de pytest</b> sobre la lógica de negocio (sin Airflow): validación del CSV, cliente de la API con 429/401 mockeados, carga transaccional, reporte; más tests de estructura de DAGs y de secretos.</li>
+  <li><b>CI</b> (<code>lint-and-test</code>) en cada PR: ruff → <code>dbt parse</code> → pytest, con credenciales ficticias.</li>
+  <li><b>Branch Protection</b> en <code>main</code>: PR obligatorio y CI en verde.</li>
+  <li><b>CD</b> al mergear: repite el CI y publica la imagen versionada en GitHub Container Registry.</li>
+</ul>
+</div>
+</div>
+
+<h2>7. Seguridad</h2>
+<ul>
+  <li><b>Cero credenciales en Git:</b> todo en <code>.env</code> (ignorado), inyectado como Connections/Variables de Airflow
+      (<code>AIRFLOW_CONN_*</code>) y leído por dbt con <code>env_var()</code>. El CI falla si se versiona un secreto.</li>
+  <li><b>Mínimo privilegio:</b> en Snowflake, 3 roles (ingesta: solo <code>INSERT/DELETE</code> en 2 tablas RAW; transformación;
+      lector de MARTS). En MinIO, un usuario de servicio limitado a un bucket y sin permiso de borrar.</li>
+  <li><b>SFTP solo con llave SSH</b> generada por instalación; la API key viaja en cabecera, nunca en la URL ni en logs.</li>
+</ul>
+
+<h2>8. Camino a producción</h2>
+<p>Secrets Backend (AWS Secrets Manager o Vault) en lugar de <code>.env</code>; CeleryExecutor o KubernetesExecutor si crece el
+volumen; alertas a Slack/Teams desde el callback; mart incremental; host key fijo del SFTP del proveedor; y,
+como alternativa gestionada, MWAA, Cloud Composer o Astronomer desplegando la misma imagen que publica el CD.</p>
+<div class="nota">Cómo levantarlo, operar y reprocesar: ver <code>README.md</code> del repositorio (secciones 3 y 4).</div>
+</body>
+</html>
