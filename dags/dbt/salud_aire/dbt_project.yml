@@ -1,0 +1,50 @@
+name: salud_aire
+version: "1.0.0"
+config-version: 2
+profile: salud_aire
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+analysis-paths: ["analyses"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+# Parametros de negocio: un solo lugar para cambiarlos (y quedan versionados).
+vars:
+  guia_oms_pm25_24h: 15          # OMS 2021, PM2.5 promedio 24 h (µg/m³)
+  eca_peru_pm25_24h: 50          # ECA Peru (DS 003-2017-MINAM), PM2.5 24 h (µg/m³)
+  radio_max_estacion_km: 10      # distancia maxima distrito-estacion para usar su medicion
+  cobertura_minima_pct: 50       # % minimo de horas medidas para confiar en el promedio diario
+  umbral_alza_atenciones_pct: 20 # alza vs. promedio de 7 dias previos que dispara alerta
+
+models:
+  salud_aire:
+    +meta:
+      owner: analytics_salud
+    staging:
+      +materialized: view
+      +schema: staging
+    intermediate:
+      +materialized: view
+      +schema: intermediate
+    marts:
+      +materialized: table
+      +schema: marts
+
+seeds:
+  salud_aire:
+    +schema: staging
+    distritos_lima:
+      +column_types:
+        ubigeo: varchar(6)
+        latitud: float
+        longitud: float
+    alias_distritos:
+      +column_types:
+        ubigeo: varchar(6)
+
+data_tests:
+  salud_aire:
+    +schema: auditoria

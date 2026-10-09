@@ -1,0 +1,65 @@
+version: 2
+
+models:
+  - name: stg_atenciones
+    description: Atenciones respiratorias limpias y deduplicadas (una fila por clave natural).
+    data_tests:
+      - combinacion_unica:
+          arguments:
+            columnas: [fecha_atencion, codigo_clinica, distrito_reportado, grupo_edad, diagnostico_cie10]
+    columns:
+      - name: fecha_atencion
+        data_tests:
+          - not_null
+      - name: distrito_reportado
+        description: Distrito normalizado (mayusculas, sin tildes) pero aun sin mapear a ubigeo.
+        data_tests:
+          - not_null
+          # Un distrito escrito de una forma nueva NO debe detener el pipeline,
+          # pero si debe quedar visible: warn + store_failures (tabla en AUDITORIA).
+          - relationships:
+              arguments:
+                to: ref('alias_distritos')
+                field: alias_normalizado
+              config:
+                severity: warn
+                store_failures: true
+                alias: distritos_sin_mapear
+      - name: grupo_edad
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["0-4", "5-17", "18-59", "60+"]
+      - name: categoria_cie10
+        description: Categoria CIE-10 de 3 caracteres (J06 = IRA alta, J18 = neumonia, J45 = asma...).
+      - name: num_atenciones
+        data_tests:
+          - not_null
+          - no_negativo
+
+  - name: stg_mediciones_aire
+    description: PM2.5 promedio de 24 h por estacion y dia.
+    data_tests:
+      - combinacion_unica:
+          arguments:
+            columnas: [fecha, estacion_id]
+    columns:
+      - name: fecha
+        data_tests:
+          - not_null
+      - name: estacion_id
+        data_tests:
+          - not_null
+      - name: pm25_promedio_24h
+        description: µg/m³. Valores fuera de 0-1000 son fisicamente imposibles en ambiente.
+        data_tests:
+          - not_null
+          - valor_en_rango:
+              arguments:
+                minimo: 0
+                maximo: 1000
+      - name: fuente
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["openaq", "simulada"]

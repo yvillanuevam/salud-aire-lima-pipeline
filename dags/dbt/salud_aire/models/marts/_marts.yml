@@ -1,0 +1,61 @@
+version: 2
+
+models:
+  - name: dim_distrito
+    description: Distritos de Lima Metropolitana cubiertos por el analisis.
+    columns:
+      - name: ubigeo
+        description: Codigo de ubicacion geografica del INEI.
+        data_tests:
+          - unique
+          - not_null
+
+  - name: fct_salud_aire_distrito_dia
+    description: >
+      Hecho principal del proyecto. Una fila por distrito y dia: atenciones
+      respiratorias, PM2.5 de 24 h, categoria de calidad del aire y bandera de
+      alerta de salud publica. Fuente unica de verdad para el reporte diario y
+      para cualquier dashboard.
+    config:
+      meta:
+        owner: analytics_salud
+    data_tests:
+      - combinacion_unica:
+          arguments:
+            columnas: [fecha, ubigeo]
+    columns:
+      - name: fecha
+        data_tests:
+          - not_null
+      - name: ubigeo
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_distrito')
+                field: ubigeo
+      - name: total_atenciones
+        description: Atenciones respiratorias de residentes del distrito (todas las clinicas).
+        data_tests:
+          - not_null
+          - no_negativo
+      - name: pm25_promedio_24h
+        description: µg/m³, de la estacion mas cercana con dato confiable. Nulo = sin cobertura.
+        data_tests:
+          - valor_en_rango:
+              arguments:
+                minimo: 0
+                maximo: 1000
+      - name: categoria_aire
+        description: DENTRO_GUIA_OMS (<=15), SOBRE_GUIA_OMS (15-50], SOBRE_ECA_PERU (>50), SIN_COBERTURA.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["DENTRO_GUIA_OMS", "SOBRE_GUIA_OMS", "SOBRE_ECA_PERU", "SIN_COBERTURA"]
+      - name: variacion_vs_7d_pct
+        description: Variacion % de atenciones frente al promedio de los 7 dias previos (nulo sin historia).
+      - name: alerta_salud_publica
+        description: TRUE si el aire supera la guia OMS y las atenciones suben >= 20% vs. 7 dias previos.
+        data_tests:
+          - not_null

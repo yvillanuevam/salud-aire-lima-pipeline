@@ -1,0 +1,47 @@
+version: 2
+
+sources:
+  - name: raw
+    description: Datos tal como llegan de las fuentes, cargados por el DAG pipeline_salud_aire.
+    database: SALUD_AIRE_DB
+    schema: RAW
+    config:
+      loaded_at_field: _cargado_en
+      freshness:
+        warn_after: { count: 36, period: hour }
+        error_after: { count: 72, period: hour }
+    tables:
+      - name: atenciones_respiratorias
+        description: >
+          Atenciones por enfermedades respiratorias (CIE-10 capitulo J) que la red
+          de clinicas envia cada dia por SFTP. Una fila = clinica x distrito de
+          residencia del paciente x grupo de edad x diagnostico. Ya paso la
+          validacion estructural en Airflow, pero puede traer reenvios duplicados
+          y distritos escritos de distintas formas.
+        columns:
+          - name: fecha_atencion
+          - name: codigo_clinica
+          - name: distrito
+            description: Distrito tal cual lo escribio la clinica (texto libre).
+          - name: grupo_edad
+          - name: diagnostico_cie10
+          - name: num_atenciones
+          - name: _numero_fila
+            description: Fila del archivo original; la ultima ocurrencia gana ante reenvios.
+          - name: _archivo_origen
+            description: Objeto del data lake (MinIO) del que se cargo la fila.
+
+      - name: mediciones_aire
+        description: >
+          Promedio diario de PM2.5 por sensor, obtenido de la API OpenAQ v3
+          (o de la fuente simulada si asi se configuro; ver columna fuente).
+        columns:
+          - name: fecha
+          - name: estacion_id
+          - name: sensor_id
+          - name: parametro
+          - name: valor_promedio
+            description: Promedio de 24 h en la unidad de la columna unidad (µg/m³ para PM2.5).
+          - name: cobertura_pct
+            description: Porcentaje de horas del dia con medicion.
+          - name: fuente

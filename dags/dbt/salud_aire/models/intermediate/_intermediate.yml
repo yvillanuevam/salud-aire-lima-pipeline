@@ -1,0 +1,41 @@
+version: 2
+
+models:
+  - name: int_atenciones_distrito_dia
+    description: Atenciones respiratorias por distrito oficial (ubigeo) y dia.
+    data_tests:
+      - combinacion_unica:
+          arguments:
+            columnas: [fecha, ubigeo]
+    columns:
+      - name: ubigeo
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('distritos_lima')
+                field: ubigeo
+      - name: total_atenciones
+        data_tests:
+          - not_null
+          - no_negativo
+
+  - name: int_pm25_distrito_dia
+    description: >
+      PM2.5 de 24 h asignado a cada distrito desde su estacion mas cercana
+      (con cobertura suficiente y dentro del radio maximo). Un distrito sin
+      estacion cercana ese dia simplemente no aparece.
+    data_tests:
+      - combinacion_unica:
+          arguments:
+            columnas: [fecha, ubigeo]
+    columns:
+      - name: distancia_estacion_km
+        data_tests:
+          - valor_en_rango:
+              arguments:
+                minimo: 0
+                maximo: "{{ var('radio_max_estacion_km') }}"
+      - name: pm25_promedio_24h
+        data_tests:
+          - not_null

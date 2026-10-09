@@ -1,0 +1,37 @@
+version: 2
+
+seeds:
+  - name: distritos_lima
+    description: >
+      Catalogo de distritos de Lima Metropolitana cubiertos por el analisis.
+      ubigeo = codigo INEI. latitud/longitud = centroide aproximado, usado solo
+      para asignar la estacion de monitoreo mas cercana.
+    columns:
+      - name: ubigeo
+        data_tests:
+          - unique
+          - not_null
+      - name: zona
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["Lima Centro", "Lima Norte", "Lima Este", "Lima Sur"]
+
+  - name: alias_distritos
+    description: >
+      Diccionario de las formas en que las clinicas escriben cada distrito
+      (ya normalizadas con la macro normalizar_texto) -> ubigeo oficial.
+      Cuando aparece una forma nueva, el test de relationships de
+      stg_atenciones avisa (severity warn) y basta con agregar una fila aqui.
+    columns:
+      - name: alias_normalizado
+        data_tests:
+          - unique
+          - not_null
+      - name: ubigeo
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('distritos_lima')
+                field: ubigeo

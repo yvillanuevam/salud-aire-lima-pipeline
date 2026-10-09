@@ -1,0 +1,18 @@
+# profiles.yml — lo usan dbt y Cosmos dentro del contenedor de Airflow.
+# Las credenciales NUNCA se escriben aqui: se leen de variables de entorno
+# (definidas en .env -> docker-compose.yaml). Este archivo SI se versiona.
+salud_aire:
+  target: dev
+  outputs:
+    dev:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
+      user: "{{ env_var('SNOWFLAKE_USER') }}"
+      password: "{{ env_var('SNOWFLAKE_PASSWORD') }}"
+      role: "{{ env_var('SNOWFLAKE_ROLE_DBT', 'ROLE_SALUD_AIRE_TRANSFORMACION') }}"
+      database: SALUD_AIRE_DB
+      warehouse: WH_SALUD_AIRE
+      schema: STAGING
+      threads: 4
+      client_session_keep_alive: false
+      query_tag: dbt_salud_aire
