@@ -1,0 +1,80 @@
+name: CI
+
+# Corre en cada Pull Request hacia main (el check "lint-and-test" es el que
+# exige la Branch Protection Rule) y es reutilizado por el workflow de CD.
+on:
+  pull_request:
+    branches: [main]
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  AIRFLOW_VERSION: "3.0.6"
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  lint-and-test:
+    name: lint-and-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      # Valores FICTICIOS y publicos: dbt parse / dbt ls necesitan que existan,
+      # pero no se conectan a Snowflake. Las credenciales reales nunca llegan a CI.
+      SNOWFLAKE_ACCOUNT: ci_sin_conexion
+      SNOWFLAKE_USER: ci
+      SNOWFLAKE_PASSWORD: ci
+      AIRFLOW_HOME: /tmp/airflow_ci
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verificar que no se versionen secretos
+        run: |
+          if git ls-files | grep -E '(^|/)\.env$|id_ed25519|\.pem$|deploy_key'; then
+            echo "::error::Hay archivos con secretos versionados. Quitalos del repo y del historial."
+            exit 1
+          fi
+          echo "OK: ningun archivo de secretos versionado."
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dbt.txt
+            requirements-dev.txt
+
+      - name: Instalar Airflow + providers + Cosmos (con constraints oficiales)
+        run: |
+          pip install "apache-airflow==${AIRFLOW_VERSION}" -r requirements.txt \
+            --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-${AIRFLOW_VERSION}/constraints-${PYTHON_VERSION}.txt"
+          pip install -r requirements-dev.txt
+
+      - name: Instalar dbt en un entorno virtual aislado (igual que en la imagen)
+        run: |
+          python -m venv "$RUNNER_TEMP/dbt_venv"
+          "$RUNNER_TEMP/dbt_venv/bin/pip" install -r requirements-dbt.txt
+          echo "DBT_EXECUTABLE_PATH=$RUNNER_TEMP/dbt_venv/bin/dbt" >> "$GITHUB_ENV"
+
+      - name: Lint (ruff)
+        run: ruff check dags tests
+
+      - name: Validar proyecto dbt (dbt parse, sin conexion a Snowflake)
+        working-directory: dags/dbt/salud_aire
+        run: '"$DBT_EXECUTABLE_PATH" parse --profiles-dir .'
+
+      - name: Inicializar base de metadatos de Airflow (SQLite temporal)
+        run: airflow db migrate
+
+      - name: Tests (logica de negocio + estructura de DAGs + seguridad)
+        run: pytest -v
