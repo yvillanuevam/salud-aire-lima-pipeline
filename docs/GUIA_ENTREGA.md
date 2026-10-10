@@ -1,89 +1,40 @@
-# Guía de entrega — pasos que el equipo hace a mano
+# Guía de entrega
 
-El código está completo, pero hay cosas que **solo el equipo puede hacer** (y que el profesor
-revisa): el historial de Git, el repositorio público, la Branch Protection, el Pull Request con
-el CI en verde y el video. Esta guía las ordena.
+Resumen de lo que el equipo hace a mano para cerrar los tres entregables
+(repositorio público, video demo y documento de arquitectura). La versión
+detallada, paso a paso y para principiantes, es el documento Word
+*Guía paso a paso — Salud-Aire Lima* que acompaña al proyecto.
 
----
+## 1. Branch Protection (una vez)
 
-## 1. Historial de commits real (no un commit gigante)
+*Settings → Branches → Add classic branch protection rule* → patrón `main` →
+✅ *Require a pull request before merging* → ✅ *Require status checks to pass*
+→ elegir **`lint-and-test`** → *Create*.
 
-El enunciado penaliza "un solo commit *proyecto final completo*". La forma honesta de lograr un
-historial legible es **subir el proyecto por partes, a medida que cada parte se prueba en su
-máquina**. Orden sugerido (cada línea = un commit; las marcadas con **PR** van en una rama + Pull Request):
+## 2. Levantar y correr el pipeline
 
-| # | Qué se agrega | Se prueba con | Mensaje sugerido |
-|---|---|---|---|
-| 1 | `.gitignore`, `.gitattributes`, `.env.example`, `scripts/`, `README.md` (borrador) | `scripts/preparar_env` crea `.env` | `chore: estructura inicial y plantilla de configuracion` |
-| 2 | `Dockerfile`, `docker-compose.yaml`, `requirements*.txt`, `infra/minio/` | `docker compose up` → todo *healthy* | `feat(infra): Airflow 3 + SFTP + MinIO con docker compose` |
-| 3 | `dags/salud_aire/{config,fechas,simulacion}.py`, `dags/simulador_envio_clinicas.py` | El simulador deja el CSV en el SFTP | `feat: simulador del proveedor SFTP de clinicas` |
-| 4 | `dags/salud_aire/atenciones.py` + `tests/test_atenciones.py`, `pytest.ini`, `pyproject.toml` | `pytest` | `feat: validacion del CSV de atenciones con cuarentena` |
-| 5 | `.github/workflows/ci.yml` — **PR** | El check `lint-and-test` corre en el PR | `ci: workflow de lint y tests en pull requests` |
-| 6 | Branch Protection (sección 3) | Ya no se puede pushear directo a `main` | *(configuración, sin commit)* |
-| 7 | `calidad_aire.py` + `tests/test_calidad_aire.py` + fixtures — **PR** | CI en verde | `feat: cliente OpenAQ con reintentos y backoff` |
-| 8 | `infra/snowflake/`, `carga_snowflake.py`, tests — **PR** | Script SQL corrido en Snowsight | `feat: carga idempotente a Snowflake RAW` |
-| 9 | `dags/dbt/salud_aire/` — **PR** | `dbt debug` y `dbt build` dentro del contenedor | `feat(dbt): modelos staging, intermediate y marts con tests` |
-| 10 | `dags/pipeline_salud_aire.py`, `reporte.py`, `alertas.py`, `tests/test_dags.py`, `tests/test_seguridad.py` — **PR** | El DAG corre de punta a punta | `feat: DAG productivo con Cosmos y reporte diario` |
-| 11 | `.github/workflows/cd.yml` — **PR** | Al mergear se publica la imagen en GHCR | `cd: publicar imagen de Airflow al mergear a main` |
-| 12 | `docs/`, README final — **PR** | — | `docs: arquitectura, glosario y guia de operacion` |
+1. Completar `SNOWFLAKE_*` y `OPENAQ_API_KEY` en `.env` y correr
+   `infra/snowflake/01_setup_snowflake.sql` en Snowsight.
+2. Detener otros proyectos de Docker que no se usen (Airflow consume mucha RAM).
+3. Doble clic en `scripts\levantar.bat` → debe terminar en **LISTO**.
+4. Doble clic en `scripts\diagnostico.bat` → Connections en **OK** y
+   `dbt debug` con **All checks passed!**
+5. Doble clic en `scripts\ejecutar_8_dias.bat` → procesa los 8 días previos.
 
-> Lo ideal es que **cada integrante haga sus propios commits** (con su usuario de GitHub) y que
-> estos se repartan en varios días, como en el cronograma del enunciado.
+## 3. Cambios del equipo (historial real)
 
-Antes del primer `git add`, confirmar que `.env` **no** aparece en `git status`.
+Cada cambio nuevo va en una rama y un Pull Request; el check `lint-and-test`
+debe quedar en verde antes del merge. Ejemplos: nombres del equipo y link del
+video en el README, alias nuevos de distritos en
+`dags/dbt/salud_aire/seeds/alias_distritos.csv`, capturas en `docs/`.
 
-## 2. Crear el repositorio público y subir
+## 4. Checklist final
 
-```powershell
-git init
-git branch -M main
-git add .gitignore .gitattributes .env.example scripts README.md
-git commit -m "chore: estructura inicial y plantilla de configuracion"
-git remote add origin https://github.com/<usuario>/salud-aire-lima-pipeline.git
-git push -u origin main
-```
-
-En GitHub: *New repository* → nombre `salud-aire-lima-pipeline` → **Public** (obligatorio) → sin README.
-
-Para cada PR:
-
-```powershell
-git checkout -b feature/cliente-openaq
-git add dags/salud_aire/calidad_aire.py tests/test_calidad_aire.py tests/fixtures
-git commit -m "feat: cliente OpenAQ con reintentos y backoff"
-git push -u origin feature/cliente-openaq
-# En GitHub: Compare & pull request -> esperar check verde -> Merge -> borrar la rama
-git checkout main; git pull
-```
-
-## 3. Branch Protection y Environment
-
-1. **Settings → Branches → Add branch protection rule** (o *Rulesets*).
-   - *Branch name pattern*: `main`
-   - ✅ *Require a pull request before merging*
-   - ✅ *Require status checks to pass before merging* → buscar y elegir **`lint-and-test`**
-     (aparece después de que el CI corrió al menos una vez en un PR).
-   - ✅ *Do not allow bypassing the above settings* (opcional, recomendado).
-2. **Settings → Environments → New environment** → `produccion` (lo usa `cd.yml`).
-   Opcional: *Required reviewers* para aprobar cada despliegue.
-3. **Settings → Actions → General → Workflow permissions**: dejar *Read repository contents*;
-   `cd.yml` pide `packages: write` solo para su job.
-
-Captura de pantalla de la regla para el documento de arquitectura o el video.
-
-## 4. Checklist final (sección 13 del enunciado)
-
-```powershell
-docker compose down -v; docker compose build; docker compose up airflow-init; docker compose up -d
-git log --oneline            # historial real, varios autores/fechas
-git log --all -- .env        # NO debe mostrar nada
-docker compose exec airflow-scheduler bash -c "cd /opt/airflow/dags/dbt/salud_aire && /opt/airflow/dbt_venv/bin/dbt build --profiles-dir ."
-```
-
-- [ ] `docker compose up` levanta todo desde cero en otra máquina siguiendo solo el README.
-- [ ] Último PR con el check `lint-and-test` en verde antes del merge.
-- [ ] `dbt build` pasa (los `warn` de distritos sin mapear son esperados).
-- [ ] Ningún archivo con credenciales en el historial.
+- [ ] `levantar.bat` levanta todo desde cero siguiendo solo el README.
+- [ ] `git log --all -- .env` no muestra nada.
+- [ ] El último Pull Request tiene `lint-and-test` en verde antes del merge.
+- [ ] Branch Protection activa en `main`.
+- [ ] `MARTS.FCT_SALUD_AIRE_DISTRITO_DIA` con datos de 8 días.
 - [ ] Video grabado con el pipeline corriendo de verdad.
 - [ ] PDF de arquitectura con el link del video y del repositorio.
 
@@ -92,11 +43,9 @@ docker compose exec airflow-scheduler bash -c "cd /opt/airflow/dags/dbt/salud_ai
 | Min | Qué mostrar |
 |---|---|
 | 0:00-0:45 | El problema en 2 frases y el diagrama (`docs/arquitectura.png`). |
-| 0:45-1:45 | `docker compose ps` todo *healthy*; `.env.example` vs. `.gitignore` (dónde viven los secretos); UI de Airflow con los 2 DAGs. |
-| 1:45-3:30 | Disparar el simulador y luego `pipeline_salud_aire`. Mostrar en *Graph*: sensor en `reschedule`, *mapped tasks* de la API con el pool, TaskGroups y las tareas de Cosmos (una por modelo y test). |
-| 3:30-4:30 | MinIO: `raw/`, `staged/`, `cuarentena/` (abrir el CSV de rechazados con su motivo) y `reportes/`. |
-| 4:30-5:30 | Snowflake: `RAW` → `MARTS.FCT_SALUD_AIRE_DISTRITO_DIA`; una consulta de `analyses/consultas_consumo.sql`; `AUDITORIA.DISTRITOS_SIN_MAPEAR` (CALLAO). |
-| 5:30-7:00 | GitHub: un PR con el check `lint-and-test` en verde, la Branch Protection, la pestaña Actions con el CD publicando la imagen, y `git log`. |
-| 7:00-7:30 | Cierre: qué se haría para producción (Secrets Backend, Celery/Kubernetes, alertas a Slack). |
-
-Subir a YouTube (no listado) o Google Drive y pegar el link en el PDF de arquitectura.
+| 0:45-1:45 | Docker Desktop con los contenedores en verde; `.env.example` y `.gitignore` (dónde viven los secretos); Airflow con los 2 DAGs. |
+| 1:45-3:30 | Disparar el simulador y luego `pipeline_salud_aire`. En *Graph*: sensor en `reschedule`, tareas mapeadas de la API con el pool, TaskGroups y las tareas de Cosmos. |
+| 3:30-4:30 | MinIO: `raw/`, `staged/`, `cuarentena/` (CSV de rechazados con su motivo) y `reportes/`. |
+| 4:30-5:30 | Snowflake: el mart final, una consulta de `analyses/consultas_consumo.sql` y `AUDITORIA.DISTRITOS_SIN_MAPEAR`. |
+| 5:30-7:00 | GitHub: un Pull Request con `lint-and-test` en verde y su merge, la Branch Protection, Actions con el CD y el historial de commits. |
+| 7:00-7:30 | Cierre: qué se haría en producción (Secrets Backend, más workers, alertas). |

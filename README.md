@@ -143,7 +143,7 @@ docker compose down -v   # borra TODO (volúmenes incluidos) para empezar de cer
 ## 4. Cómo correr el pipeline
 
 1. En la UI de Airflow, activa (*unpause*) `simulador_envio_clinicas` y `pipeline_salud_aire`.
-2. Dispara **`simulador_envio_clinicas`** con *Trigger DAG w/ config* →
+2. **Atajo:** doble clic en `scripts\ejecutar_8_dias.bat` hace los pasos 2 y 3 para los 8 días previos a hoy, uno detrás de otro (deja el detalle en `logs_ejecucion\pipeline.log`). O, a mano: dispara **`simulador_envio_clinicas`** con *Trigger DAG w/ config* →
    `{"fecha_proceso": "2026-10-07"}` (o déjalo vacío para "ayer"). Sube el CSV al SFTP.
 3. Dispara **`pipeline_salud_aire`** con la **misma** `fecha_proceso`. El sensor encuentra
    el archivo y el pipeline corre de punta a punta (~5-10 min).
