@@ -344,7 +344,9 @@ dbt y reporte), declarados como `owner` en las tareas y en el `meta` de dbt.
 | El sensor espera para siempre | No se corrió el simulador para esa `fecha_proceso`, o se usaron fechas distintas en ambos DAGs. |
 | `OpenAQ rechazo la API key (HTTP 401)` | `OPENAQ_API_KEY` vacía o mal copiada en `.env`; luego `docker compose up -d`. |
 | `OpenAQ no tiene sensores PM2.5 activos cerca de Lima` | La API no tiene estaciones activas ese día: usa `FUENTE_CALIDAD_AIRE=simulada` y `docker compose up -d`. |
-| `Could not connect to Snowflake` / `dbt debug` falla | `SNOWFLAKE_ACCOUNT` debe ser `identificador.region`; ¿corriste el script de setup y reemplazaste tu usuario? |
+| `Could not connect to Snowflake` / `dbt debug` falla | `SNOWFLAKE_ACCOUNT` va como `ORGANIZACION-CUENTA` (por ejemplo `ABCDEFG-XY12345`); ¿corriste el script de setup y reemplazaste tu usuario? |
+| `Incorrect username or password was specified` | `SNOWFLAKE_USER` debe ser el *login name* con el que entras a Snowsight (a veces es tu correo). Prueba el usuario y la contraseña del `.env` en una ventana de incógnito; si la contraseña tiene `$`, escríbela entre comillas simples. Luego `levantar.bat`. |
+| `PermissionError: Permission denied` en `simulador_envio_clinicas` | La carpeta `/upload` del SFTP quedó con dueño root. Desde esta versión `sftp-keygen` le asigna el dueño correcto: actualiza el repositorio (`git pull`) y repite `levantar.bat`. |
 | `Insufficient privileges` en dbt | El rol `ROLE_SALUD_AIRE_TRANSFORMACION` no está asignado a tu usuario (paso 4 del script SQL). |
 | `Se rechazo el X% de las filas` | Funciona como se diseñó: revisa `cuarentena/` en MinIO. El umbral es la Variable `umbral_rechazo_atenciones`. |
 | Cambié `requirements*.txt` y no lo toma | `docker compose build` y luego `docker compose up -d`. |

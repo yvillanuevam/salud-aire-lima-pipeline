@@ -1,6 +1,6 @@
 # scripts/ejecutar_pipeline.ps1
-# Corre el simulador del proveedor y el pipeline para uno o varios dias, uno
-# detras de otro, y deja el detalle en logs_ejecucion/pipeline.log
+# Corre el simulador del proveedor (primero, para todos los dias) y luego el
+# pipeline dia por dia; deja el detalle en logs_ejecucion/pipeline.log
 #
 # Uso:
 #   scripts\ejecutar_pipeline.bat                     -> procesa AYER
@@ -10,7 +10,7 @@
 param(
     [string]$Hasta = (Get-Date).AddDays(-1).ToString("yyyy-MM-dd"),
     [int]$Dias = 1,
-    [int]$TimeoutMinutos = 30
+    [int]$TimeoutMinutos = 60
 )
 
 $ErrorActionPreference = "Continue"
@@ -52,18 +52,30 @@ try {
     Airflow "airflow dags unpause pipeline_salud_aire" | Out-Host
 
     $fin = [datetime]::ParseExact($Hasta, "yyyy-MM-dd", $null)
-    for ($i = $Dias - 1; $i -ge 0; $i--) {
-        $fecha = $fin.AddDays(-$i).ToString("yyyy-MM-dd")
-        $sello = Get-Date -Format "HHmmss"
-        Write-Host ""
-        Write-Host "=== Dia $fecha ===" -ForegroundColor Cyan
-        # conf en un archivo de la carpeta config/ (montada en /opt/airflow/config)
-        Set-Content -Path (Join-Path $raiz "config\conf_fecha.json") -Value "{`"fecha_proceso`":`"$fecha`"}" -Encoding ASCII -NoNewline
+    $fechas = @(for ($i = $Dias - 1; $i -ge 0; $i--) { $fin.AddDays(-$i).ToString("yyyy-MM-dd") })
+    $sello = Get-Date -Format "HHmmss"
+    $confFecha = Join-Path $raiz "config\conf_fecha.json"
 
+    # Fase 1: primero se dejan TODOS los archivos en el SFTP. Al reactivar los
+    # DAGs, Airflow crea sola la corrida programada del ultimo intervalo y su
+    # sensor espera el archivo de AYER; como pipeline_salud_aire admite una sola
+    # corrida activa, las corridas manuales quedarian en cola detras de ella
+    # hasta que ese archivo exista. Con los archivos listos, nada se bloquea.
+    foreach ($fecha in $fechas) {
+        Write-Host ""
+        Write-Host "=== Simulador: archivo del $fecha ===" -ForegroundColor Cyan
+        # conf en un archivo de la carpeta config/ (montada en /opt/airflow/config)
+        Set-Content -Path $confFecha -Value "{`"fecha_proceso`":`"$fecha`"}" -Encoding ASCII -NoNewline
         $runSim = "manual_sim_${fecha}_$sello"
         Airflow "airflow dags trigger simulador_envio_clinicas --run-id $runSim --conf `$(cat /opt/airflow/config/conf_fecha.json)" | Out-Host
         if ((Esperar-Corrida "simulador_envio_clinicas" $runSim) -ne "success") { throw "El simulador fallo para $fecha" }
+    }
 
+    # Fase 2: el pipeline, un dia detras de otro (en orden, para el promedio de 7 dias).
+    foreach ($fecha in $fechas) {
+        Write-Host ""
+        Write-Host "=== Pipeline: dia $fecha ===" -ForegroundColor Cyan
+        Set-Content -Path $confFecha -Value "{`"fecha_proceso`":`"$fecha`"}" -Encoding ASCII -NoNewline
         $runPipe = "manual_pipeline_${fecha}_$sello"
         Airflow "airflow dags trigger pipeline_salud_aire --run-id $runPipe --conf `$(cat /opt/airflow/config/conf_fecha.json)" | Out-Host
         if ((Esperar-Corrida "pipeline_salud_aire" $runPipe) -ne "success") { throw "El pipeline fallo para $fecha (ver tareas arriba y la UI de Airflow)" }
