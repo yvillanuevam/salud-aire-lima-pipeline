@@ -13,7 +13,8 @@ con un alza de atenciones** y pueda reforzar personal o lanzar campañas prevent
 > publicando un reporte diario.
 
 Proyecto Final Integrador — PEDE/9 Apache Airflow.
-
+## Equipo
+Yuri Villanueva Martinez
 ---
 
 ## Contenido
