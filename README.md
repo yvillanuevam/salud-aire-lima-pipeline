@@ -340,6 +340,7 @@ dbt y reporte), declarados como `owner` en las tareas y en el `meta` de dbt.
 |---|---|
 | `Falta AIRFLOW_FERNET_KEY en .env` al hacer `docker compose up` | No se corrió `scripts/preparar_env`. Córrelo y vuelve a intentar. |
 | Contenedores que nunca quedan *healthy* | Poca RAM en Docker Desktop: súbela a 6-8 GB. |
+| Corridas lentísimas o `Process terminated by signal` en una tarea | Docker se quedó sin RAM por demasiadas tareas de dbt en paralelo. El límite es `AIRFLOW_PARALELISMO` en `.env` (4 por defecto); bájalo a 2 si persiste y repite `levantar.bat`. Evita también que el PC se suspenda durante la corrida. |
 | Solo `airflow-dag-processor` o `airflow-triggerer` en *unhealthy* | Su chequeo corre la CLI de Airflow, que en un PC cargado tarda más de lo previsto. Si en la UI aparecen los DAGs y las tareas avanzan, los procesos están bien; desde esta versión el chequeo tiene más margen (45 s). |
 | `Bind for 0.0.0.0:8080 failed` | Otro Airflow usa el puerto: apágalo o define `AIRFLOW_PORT=8081` en `.env` y entra por `http://localhost:8081`. |
 | El sensor espera para siempre | No se corrió el simulador para esa `fecha_proceso`, o se usaron fechas distintas en ambos DAGs. |
