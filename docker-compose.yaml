@@ -110,9 +110,15 @@ services:
         cp /cliente/id_ed25519.pub /servidor/airflow.pub
         chown ${AIRFLOW_UID:-50000}:0 /cliente/id_ed25519 /cliente/id_ed25519.pub
         chmod 600 /cliente/id_ed25519
+        # Docker crea el volumen de datos como root y atmoz/sftp no cambia el
+        # dueno de una carpeta que ya existe: sin esto el usuario "clinicas"
+        # (uid 1001) no puede escribir en /upload ("Permission denied").
+        chown 1001:1001 /datos
+        chmod 755 /datos
     volumes:
       - sftp-llave-cliente:/cliente
       - sftp-llaves-autorizadas:/servidor
+      - sftp-datos:/datos
     restart: "no"
 
   sftp-clinicas:
