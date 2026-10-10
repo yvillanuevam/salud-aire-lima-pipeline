@@ -46,8 +46,8 @@ try {
     if ((Ejecutar "docker compose up -d") -ne 0) { throw "Fallo docker compose up -d." }
 
     Write-Host ""
-    Write-Host "Esperando a que los servicios queden healthy (maximo 6 minutos)..." -ForegroundColor Cyan
-    $limite = (Get-Date).AddMinutes(6)
+    Write-Host "Esperando a que los servicios queden healthy (maximo 8 minutos)..." -ForegroundColor Cyan
+    $limite = (Get-Date).AddMinutes(8)
     do {
         Start-Sleep -Seconds 15
         $filas = cmd /c "docker compose ps --format {{.Service}}^|{{.State}}^|{{.Health}} 2>&1"

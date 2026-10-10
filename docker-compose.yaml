@@ -39,6 +39,13 @@ x-airflow-common:
     AIRFLOW__CORE__DEFAULT_TIMEZONE: America/Lima
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
     AIRFLOW__DAG_PROCESSOR__REFRESH_INTERVAL: "60"
+    # Limite de tareas simultaneas. Cada tarea de dbt (Cosmos) es un proceso de
+    # Airflow + un subproceso dbt (~0,5 GB); con el valor por defecto (32) un PC
+    # con ~6 GB para Docker se queda sin RAM: todo se vuelve lentisimo y el
+    # sistema mata tareas ("Process terminated by signal"). Subelo en .env si
+    # Docker tiene mas memoria.
+    AIRFLOW__CORE__PARALLELISM: ${AIRFLOW_PARALELISMO:-4}
+    AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: ${AIRFLOW_PARALELISMO:-4}
     # ---------------- Connections de Airflow (formato JSON) ----------------
     # SFTP de las clinicas: autenticacion SOLO por llave (la genera sftp-keygen).
     AIRFLOW_CONN_SFTP_CLINICAS: '{"conn_type": "sftp", "host": "sftp-clinicas", "port": 22, "login": "clinicas", "extra": {"key_file": "/opt/airflow/llaves/sftp/id_ed25519", "no_host_key_check": "true"}}'
@@ -234,11 +241,14 @@ services:
     <<: *airflow-common
     command: dag-processor
     healthcheck:
+      # "airflow jobs check" arranca la CLI completa de Airflow, que en un PC
+      # con Docker Desktop tarda ~10 s: con timeout de 10 s el chequeo fallaba
+      # aunque el proceso estuviera trabajando bien.
       test: ["CMD-SHELL", 'airflow jobs check --job-type DagProcessorJob --hostname "$${HOSTNAME}"']
-      interval: 30s
-      timeout: 10s
+      interval: 60s
+      timeout: 45s
       retries: 5
-      start_period: 30s
+      start_period: 90s
     restart: always
     depends_on:
       <<: *airflow-common-depends-on
@@ -249,11 +259,14 @@ services:
     <<: *airflow-common
     command: triggerer
     healthcheck:
+      # "airflow jobs check" arranca la CLI completa de Airflow, que en un PC
+      # con Docker Desktop tarda ~10 s: con timeout de 10 s el chequeo fallaba
+      # aunque el proceso estuviera trabajando bien.
       test: ["CMD-SHELL", 'airflow jobs check --job-type TriggererJob --hostname "$${HOSTNAME}"']
-      interval: 30s
-      timeout: 10s
+      interval: 60s
+      timeout: 45s
       retries: 5
-      start_period: 30s
+      start_period: 90s
     restart: always
     depends_on:
       <<: *airflow-common-depends-on

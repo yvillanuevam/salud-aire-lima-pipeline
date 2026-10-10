@@ -10,7 +10,7 @@
 param(
     [string]$Hasta = (Get-Date).AddDays(-1).ToString("yyyy-MM-dd"),
     [int]$Dias = 1,
-    [int]$TimeoutMinutos = 60
+    [int]$TimeoutMinutos = 120
 )
 
 $ErrorActionPreference = "Continue"
@@ -78,7 +78,9 @@ try {
         Set-Content -Path $confFecha -Value "{`"fecha_proceso`":`"$fecha`"}" -Encoding ASCII -NoNewline
         $runPipe = "manual_pipeline_${fecha}_$sello"
         Airflow "airflow dags trigger pipeline_salud_aire --run-id $runPipe --conf `$(cat /opt/airflow/config/conf_fecha.json)" | Out-Host
-        if ((Esperar-Corrida "pipeline_salud_aire" $runPipe) -ne "success") { throw "El pipeline fallo para $fecha (ver tareas arriba y la UI de Airflow)" }
+        $estadoPipe = Esperar-Corrida "pipeline_salud_aire" $runPipe
+        if ($estadoPipe -eq "failed") { throw "El pipeline fallo para $fecha (ver tareas arriba y la UI de Airflow)" }
+        if ($estadoPipe -ne "success") { throw "El pipeline del $fecha sigue en estado '$estadoPipe' tras $TimeoutMinutos minutos: NO fallo, va lento. Mira la UI de Airflow y, cuando termine, vuelve a correr el script." }
     }
     Write-Host ""
     Write-Host "LISTO: todos los dias procesados." -ForegroundColor Green
